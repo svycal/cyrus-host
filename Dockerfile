@@ -49,6 +49,13 @@ RUN npm install -g cyrus-ai @anthropic-ai/claude-code
 # home, which is where the Fly volume is mounted.
 RUN useradd --create-home --uid 1000 --shell /bin/bash cyrus
 
+# Bake the git credential helper into the image. /home/cyrus is NOT on the Fly
+# volume (only /home/cyrus/.cyrus is), so a runtime `gh auth setup-git` would not
+# survive a restart. Configuring it here makes git auth work on every boot,
+# driven by the GH_TOKEN secret via `gh auth git-credential`.
+RUN su cyrus -c "git config --global credential.'https://github.com'.helper '!gh auth git-credential'" \
+    && su cyrus -c "git config --global credential.'https://gist.github.com'.helper '!gh auth git-credential'"
+
 # mise installs per-repo runtimes from each repo's .tool-versions. Install it
 # system-wide so the cyrus user picks it up via the activation in .bashrc.
 ENV MISE_INSTALL_PATH=/usr/local/bin/mise

@@ -90,8 +90,10 @@ volume under `/home/cyrus/.cyrus`.
 
 #### Generating the `GH_TOKEN`
 
-This PAT is used inside the container by `gh auth setup-git` so the agent can
-clone, push branches, and open PRs on our private `svycal` repos.
+This PAT is what the agent uses to clone, push branches, and open PRs on our
+private `svycal` repos. The image bakes a git credential helper
+(`gh auth git-credential`) for the `cyrus` user, so git and `gh` pick up
+`GH_TOKEN` automatically on every boot — no `gh auth setup-git` step required.
 
 > **Tip:** for shared infra, prefer a dedicated bot/service GitHub account added
 > to the `svycal` org over a personal PAT — it keeps PR authorship and audit
@@ -124,26 +126,50 @@ will be rejected.
 
 ### One-time bootstrap (interactive)
 
-After the first deploy, exec into the machine to authenticate the long-lived
-state that lives on the volume:
+After the first deploy, exec in to pair Cyrus and register repos. This writes to
+`~/.cyrus` (`.env`, `config.json`), which only persists if it lands on the volume
+at `/home/cyrus/.cyrus` — so **every command must run as the `cyrus` user**.
+
+> ⚠️ `fly ssh console` logs you in as **root**, whose `~/.cyrus` is
+> `/root/.cyrus` — ephemeral and ignored by the running agent. Drop to the
+> `cyrus` user (with its `HOME`) before running anything:
 
 ```sh
 fly ssh console --app savvycal-cyrus
 
-# inside the machine, as the cyrus user:
-gh auth setup-git
-cyrus auth cysk...        # pair with our Cyrus account (hosted-connected)
-# then add repos via the Cyrus dashboard, or: cyrus self-add-repo
+# you start as root — switch to the cyrus user FIRST:
+gosu cyrus env HOME=/home/cyrus bash -l
+
+# now, as cyrus (state lands on the volume):
+cyrus auth cysk...                                   # pair (hosted-connected)
+cyrus self-add-repo https://github.com/svycal/appointments-app
 ```
 
-## Open questions (verify on first boot)
+Notes:
 
-These were unknowns when this repo was scaffolded — confirm and update this
-README:
+- `cyrus auth` / `self-add-repo` print
+  `EADDRINUSE ... 127.0.0.1:3456` after their work. That's harmless: they save
+  their state (`.env` / `config.json`) and then try to auto-start a second agent,
+  which collides with the always-on one started by the entrypoint. The running
+  agent watches `config.json` and picks up new repos live; for a fresh `.env`
+  (auth), restart once: `fly machine restart <id> --app savvycal-cyrus`.
+- No `gh auth setup-git` is needed — the credential helper is baked into the
+  image (see `GH_TOKEN` above).
+- If you accidentally run any of these as root, the state goes to `/root/.cyrus`
+  and is lost on restart; just re-run it as the `cyrus` user.
 
-- Is `@anthropic-ai/claude-code` bundled with `cyrus-ai`, or must it be installed
-  separately? (We install it explicitly for now.)
-- In hosted-connected mode, are repos configured via the dashboard or via local
-  `config.json` / `cyrus self-add-repo`?
+## Verified on first boot
+
+- ✅ The image builds and boots: `initdb` → Postgres → the Cyrus agent (v0.2.65)
+  start cleanly, and the machine stays up (no `[http_service]`, never autostops).
+- ✅ `@anthropic-ai/claude-code` runs alongside `cyrus-ai` (installed explicitly).
+- ✅ Hosted-connected mode works with secrets only — no inbound webhooks. Repos
+  are registered via local `config.json` (`cyrus self-add-repo`), which the
+  running agent watches and reloads live.
+
+## Open questions
+
 - Exact Cloudflare tunnel egress endpoints to allowlist.
 - Volume sizing once several repos' mise caches coexist.
+- Git commit identity: confirm whether Cyrus sets `user.name`/`user.email` per
+  repo, or whether we need a baked global default for the `cyrus` user.

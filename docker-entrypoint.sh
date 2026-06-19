@@ -39,4 +39,6 @@ gosu postgres /usr/lib/postgresql/*/bin/pg_ctl -D "${PGDATA}" \
 
 echo "==> Starting Cyrus agent as cyrus user"
 cd "${CYRUS_HOME}"
-exec gosu cyrus bash -lc 'exec cyrus'
+# Pin HOME so git (and anything $HOME-based) resolves to /home/cyrus, where the
+# baked .gitconfig and the volume-backed .cyrus state both live.
+exec gosu cyrus env HOME="${CYRUS_HOME}" bash -lc 'exec cyrus'
