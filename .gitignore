@@ -1,0 +1,6 @@
+# Local Fly state
+.fly/
+
+# Editor / OS cruft
+.DS_Store
+*.swp

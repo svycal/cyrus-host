@@ -1,0 +1,24 @@
+# fly.toml for the self-hosted Cyrus agent (shared infra). See README.md.
+#
+# Always-on by design: there is NO [http_service], so Fly never autostops the
+# machine. Cyrus connects outbound via a Cloudflare tunnel (hosted-connected
+# mode) and must stay running to receive work.
+
+app = 'savvycal-cyrus'
+primary_region = 'iad'
+
+[build]
+
+[env]
+  # Pin per-repo runtime + state under the volume so nothing depends on the
+  # ephemeral root filesystem.
+  MISE_DATA_DIR = '/home/cyrus/.cyrus/mise/data'
+  MISE_CACHE_DIR = '/home/cyrus/.cyrus/mise/cache'
+
+[mounts]
+  source = 'cyrus_data'
+  destination = '/home/cyrus/.cyrus'
+
+[[vm]]
+  size = 'performance-2x'
+  memory = '4gb'
