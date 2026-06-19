@@ -150,13 +150,36 @@ Notes:
 - `cyrus auth` / `self-add-repo` print
   `EADDRINUSE ... 127.0.0.1:3456` after their work. That's harmless: they save
   their state (`.env` / `config.json`) and then try to auto-start a second agent,
-  which collides with the always-on one started by the entrypoint. The running
-  agent watches `config.json` and picks up new repos live; for a fresh `.env`
-  (auth), restart once: `fly machine restart <id> --app savvycal-cyrus`.
+  which collides with the always-on one started by the entrypoint.
+- **A restart is needed after pairing or adding/registering a repo.** In practice
+  the running agent does *not* hot-load a new repo from a `config.json` change
+  (whether written by `self-add-repo` or the Cyrus dashboard) — it only reloads
+  `.env`. Restart so it boots with the updated config:
+  `fly machine restart <id> --app savvycal-cyrus`. On a clean boot it logs
+  `📦 Managing N repositories` listing what it picked up. (The repo itself is
+  cloned lazily into `~/.cyrus/repos/<name>` on the first issue, not at boot.)
 - No `gh auth setup-git` is needed — the credential helper is baked into the
   image (see `GH_TOKEN` above).
 - If you accidentally run any of these as root, the state goes to `/root/.cyrus`
   and is lost on restart; just re-run it as the `cyrus` user.
+
+### Verify GitHub access before assigning issues
+
+The repo is cloned lazily on the first issue, so a bad `GH_TOKEN` (e.g. a
+fine-grained PAT scoped to your personal account instead of the `svycal` org)
+isn't caught until that first run fails at clone. Verify access up front as the
+`cyrus` user — both checks should succeed:
+
+```sh
+fly ssh console --app savvycal-cyrus -C "/bin/bash -lc '
+  gosu cyrus env HOME=/home/cyrus gh api repos/svycal/appointments-app --jq .permissions;
+  gosu cyrus env HOME=/home/cyrus git ls-remote https://github.com/svycal/appointments-app refs/heads/main >/dev/null && echo \"git: OK\"
+'"
+```
+
+A `404` from `gh api` or a `403` from `git ls-remote` means the token can't see
+the repo — re-scope the PAT (resource owner `svycal`, Contents + Pull requests
+read/write) and `fly secrets set GH_TOKEN=…` (which restarts the machine).
 
 ## Verified on first boot
 
