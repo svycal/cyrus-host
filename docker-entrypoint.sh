@@ -8,14 +8,21 @@ CYRUS_HOME=/home/cyrus
 STATE_DIR="${CYRUS_HOME}/.cyrus"          # Fly volume mount point
 export PGDATA="${STATE_DIR}/pgdata"
 
-# The volume mounts as root-owned on first boot; hand it to the cyrus user.
+# The volume mounts root-owned on first boot. Hand the top-level state dir to the
+# cyrus user (its config, repos, worktrees, and mise cache live here), but give
+# Postgres its own pgdata subdir — initdb runs as the postgres user and can't
+# write into a cyrus-owned directory. Chown only these two roots (NOT -R), so an
+# already-initialized pgdata keeps its postgres ownership across reboots.
 mkdir -p "${STATE_DIR}"
-chown -R cyrus:cyrus "${STATE_DIR}"
+chown cyrus:cyrus "${STATE_DIR}"
 
 # Initialize the cluster once. The bootstrap superuser is `postgres`, and we set
 # its password to `postgres` to match what app dev configs expect.
 if [ ! -s "${PGDATA}/PG_VERSION" ]; then
   echo "==> Initializing PostgreSQL cluster at ${PGDATA}"
+  mkdir -p "${PGDATA}"
+  chown postgres:postgres "${PGDATA}"
+  chmod 700 "${PGDATA}"
   PWFILE="$(mktemp)"
   echo "postgres" > "${PWFILE}"
   chown postgres:postgres "${PWFILE}"
