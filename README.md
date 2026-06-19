@@ -73,6 +73,40 @@ The Cyrus connection token (`cysk…`) is **not** a Fly secret — it's register
 once interactively in the one-time bootstrap below and then persists on the
 volume under `/home/cyrus/.cyrus`.
 
+#### Generating the `GH_TOKEN`
+
+This PAT is used inside the container by `gh auth setup-git` so the agent can
+clone, push branches, and open PRs on our private `svycal` repos.
+
+> **Tip:** for shared infra, prefer a dedicated bot/service GitHub account added
+> to the `svycal` org over a personal PAT — it keeps PR authorship and audit
+> trails clean and survives credential rotation. A personal PAT is fine for a
+> quick trial.
+
+**Recommended — fine-grained PAT** (GitHub → Settings → Developer settings →
+[Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)):
+
+1. **Token name:** e.g. `cyrus-host`.
+2. **Resource owner:** select **`svycal`** (the org that owns the repos), not
+   your personal account. If it's missing or shows "approval required," an org
+   owner must approve it, and the org must permit fine-grained tokens.
+3. **Expiration:** a finite window (e.g. 90 days); rotate later via
+   `fly secrets set`.
+4. **Repository access:** *Only select repositories* → the repos Cyrus will work
+   on (e.g. `appointments-app`, `cyrus-host`), or *All repositories*.
+5. **Repository permissions** (everything else "No access"):
+   - **Contents:** Read and write (clone + push)
+   - **Pull requests:** Read and write (open/update PRs)
+   - **Metadata:** Read-only (mandatory, auto-selected)
+   - **Workflows:** Read and write — *only* if Cyrus may edit
+     `.github/workflows/` files.
+
+**Alternative — classic PAT** (if fine-grained tokens are blocked for the org;
+[Tokens (classic)](https://github.com/settings/tokens/new)): scopes `repo`,
+`workflow` (only if editing workflow files), and `read:org`. If the org enforces
+SAML SSO, click **Configure SSO → Authorize** for `svycal` or git operations
+will be rejected.
+
 ### One-time bootstrap (interactive)
 
 After the first deploy, exec into the machine to authenticate the long-lived
