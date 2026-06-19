@@ -181,14 +181,34 @@ A `404` from `gh api` or a `403` from `git ls-remote` means the token can't see
 the repo — re-scope the PAT (resource owner `svycal`, Contents + Pull requests
 read/write) and `fly secrets set GH_TOKEN=…` (which restarts the machine).
 
+#### Recovering a missing base clone
+
+Cyrus creates the **base clone** at `~/.cyrus/repos/<name>` during the first
+issue's worktree setup, then makes a cheap git worktree per issue *from* it. If
+that first clone fails (e.g. the bad-token case above), Cyrus does **not** retry
+it on later issues — it's left with no base repo and gets stuck (the agent finds
+nothing on disk and may fall back to cloning straight into the worktree, skipping
+`cyrus-setup.sh` entirely). Recover by creating the base clone manually as the
+`cyrus` user, then re-assign the issue:
+
+```sh
+fly ssh console --app savvycal-cyrus -C "/bin/bash -lc '
+  gosu cyrus env HOME=/home/cyrus git clone https://github.com/svycal/<repo> \
+    /home/cyrus/.cyrus/repos/<repo>'"
+```
+
+This is exactly why verifying token access (above) **before** the first issue
+matters — it avoids the failed-clone-then-stuck state entirely.
+
 ## Verified on first boot
 
 - ✅ The image builds and boots: `initdb` → Postgres → the Cyrus agent (v0.2.65)
   start cleanly, and the machine stays up (no `[http_service]`, never autostops).
 - ✅ `@anthropic-ai/claude-code` runs alongside `cyrus-ai` (installed explicitly).
 - ✅ Hosted-connected mode works with secrets only — no inbound webhooks. Repos
-  are registered via local `config.json` (`cyrus self-add-repo`), which the
-  running agent watches and reloads live.
+  are registered in local `config.json` (via `cyrus self-add-repo` or the Cyrus
+  dashboard); the agent picks them up on the next **restart**, not live — see the
+  bootstrap notes above.
 
 ## Open questions
 
