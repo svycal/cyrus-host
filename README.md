@@ -53,8 +53,8 @@ fly volumes create cyrus_data --region iad --size 20 --app savvycal-cyrus
 
 # Secrets (see below for what each is)
 fly secrets set \
-  ANTHROPIC_API_KEY=sk-ant-... \
-  GH_TOKEN=ghp_... \
+  CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat... \
+  GH_TOKEN=github_pat_... \
   EZSUITE_AUTH_KEY=... \
   --app savvycal-cyrus
 
@@ -63,11 +63,26 @@ fly deploy
 
 ### Required secrets
 
-| Secret              | Purpose                                                      |
-| ------------------- | ----------------------------------------------------------- |
-| `ANTHROPIC_API_KEY` | Claude auth for the agent (or `CLAUDE_CODE_OAUTH_TOKEN`).    |
-| `GH_TOKEN`          | PAT used by `gh auth setup-git` so the agent can push PRs.   |
-| `EZSUITE_AUTH_KEY`  | Auth for our private `ezsuite` Hex repo (used by repo setup).|
+| Secret                    | Purpose                                                       |
+| ------------------------- | ------------------------------------------------------------ |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude auth for the agent (subscription token, see below).    |
+| `GH_TOKEN`                | PAT used by `gh auth setup-git` so the agent can push PRs.    |
+| `EZSUITE_AUTH_KEY`        | Auth for our private `ezsuite` Hex repo (used by repo setup). |
+
+#### Generating the `CLAUDE_CODE_OAUTH_TOKEN`
+
+We authenticate the agent with a Claude **subscription** token, not a metered
+`ANTHROPIC_API_KEY`. Generate it locally with the Claude Code CLI:
+
+```sh
+npm i -g @anthropic-ai/claude-code   # if not already installed
+claude setup-token
+```
+
+This launches a browser OAuth flow (requires a Claude Pro or Max subscription)
+and prints a long-lived `sk-ant-oat…` token. Because it needs a browser it can't
+be minted inside the Fly container — generate it on your machine, then push it as
+the `CLAUDE_CODE_OAUTH_TOKEN` secret.
 
 The Cyrus connection token (`cysk…`) is **not** a Fly secret — it's registered
 once interactively in the one-time bootstrap below and then persists on the
