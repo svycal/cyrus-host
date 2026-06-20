@@ -42,8 +42,12 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
     && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# The Cyrus agent + Claude Code, installed globally.
-RUN npm install -g cyrus-ai @anthropic-ai/claude-code
+# The Cyrus agent + Claude Code, installed globally. cyrus-ai is pinned for
+# reproducible, intentional upgrades (the Cyrus team ships frequently); bump it
+# deliberately. 0.2.66 is the first release that refreshes a repo's base clone
+# before each worktree, so edits to cyrus-setup.sh are picked up without a manual
+# base-clone reset (see README).
+RUN npm install -g cyrus-ai@0.2.66 @anthropic-ai/claude-code
 
 # Unprivileged user that runs the agent. All persistent state lives under its
 # home, which is where the Fly volume is mounted.
