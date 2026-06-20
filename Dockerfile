@@ -53,20 +53,30 @@ RUN npm install -g cyrus-ai@0.2.66 @anthropic-ai/claude-code
 # home, which is where the Fly volume is mounted.
 RUN useradd --create-home --uid 1000 --shell /bin/bash cyrus
 
+# GitHub App auth helpers. We authenticate as a GitHub App (not a PAT) so PRs the
+# agent opens carry the App's "[bot]" identity. Apps have no long-lived token, so
+# these mint installation tokens on demand from the App private key (the
+# GH_APP_* secrets):
+#   - gh-app-token          mints an installation token (or derives the bot ident)
+#   - git-credential-gh-app git credential helper that serves a fresh token
+#   - gh                    wrapper that injects a fresh token into the real gh
+# /usr/local/bin precedes /usr/bin on PATH, so the `gh` wrapper shadows the
+# apt-installed gh at /usr/bin/gh. See bin/ for details.
+COPY bin/ /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/gh-app-token /usr/local/bin/git-credential-gh-app /usr/local/bin/gh
+
 # Bake the git credential helper into the image. /home/cyrus is NOT on the Fly
 # volume (only /home/cyrus/.cyrus is), so a runtime `gh auth setup-git` would not
-# survive a restart. Configuring it here makes git auth work on every boot,
-# driven by the GH_TOKEN secret via `gh auth git-credential`.
-RUN su cyrus -c "git config --global credential.'https://github.com'.helper '!gh auth git-credential'" \
-    && su cyrus -c "git config --global credential.'https://gist.github.com'.helper '!gh auth git-credential'"
+# survive a restart. Configuring it here makes git auth work on every boot via the
+# App credential helper (which mints a token per operation).
+RUN su cyrus -c "git config --global credential.'https://github.com'.helper 'gh-app'"
 
-# Bake an explicit git committer identity for the cyrus user so agent commits are
-# authored by the cyrusagent bot, not whoever owns the GH_TOKEN (AP-894). Cyrus
-# does not set an identity itself on self-hosted, so without this git falls back
-# to a guessed user@host (or whatever a base clone's local config happens to
-# carry). This is the global default; base clones must NOT carry a local
-# user.name/user.email that would override it. The email is GitHub's noreply for
-# the cyrusagent account, so commits link to that bot on GitHub.
+# Fallback git committer identity for the cyrus user. The entrypoint derives the
+# real identity (the App's "[bot]" account) from the GitHub App at boot and
+# overrides this; this baked value only applies if that derivation fails (e.g.
+# missing GH_APP_* secrets), so commits still get *some* stable identity rather
+# than a guessed user@host (AP-894). Base clones must NOT carry a local
+# user.name/user.email — local scope would override both (see README).
 RUN su cyrus -c "git config --global user.name 'cyrusagent'" \
     && su cyrus -c "git config --global user.email '208047790+cyrusagent@users.noreply.github.com'"
 

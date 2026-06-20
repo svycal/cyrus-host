@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Wrapper that runs the real `gh` with a freshly-minted GitHub App installation
+# token, so PRs and comments the agent opens are authored by the App's bot
+# identity (the "[bot]" account) instead of whoever owns a PAT. `gh` has no
+# native GitHub App auth — it only accepts a token — so we inject one via
+# GH_TOKEN per invocation. The agent runs `gh` as a fresh subprocess each time,
+# so this mints on demand and never goes stale.
+#
+# Lives in /usr/local/bin, which precedes /usr/bin on PATH, so it shadows the
+# apt-installed gh at /usr/bin/gh (which we exec explicitly to avoid recursion).
+set -euo pipefail
+GH_TOKEN="$(gh-app-token token)"
+export GH_TOKEN
+exec /usr/bin/gh "$@"

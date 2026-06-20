@@ -37,6 +37,21 @@ echo "==> Starting PostgreSQL"
 gosu postgres /usr/lib/postgresql/*/bin/pg_ctl -D "${PGDATA}" \
   -o "-c listen_addresses=localhost -p 5432" -w start
 
+# Set the git committer identity to the GitHub App's "[bot]" account so commits
+# and PRs share one identity. Derived live from the App (no hardcoded IDs);
+# best-effort — if the GH_APP_* secrets are missing or the API is unreachable, we
+# leave the baked fallback (see Dockerfile) rather than fail the boot.
+echo "==> Resolving git committer identity from the GitHub App"
+if identity="$(gosu cyrus env HOME="${CYRUS_HOME}" gh-app-token git-identity 2>/dev/null)" \
+   && [ -n "${identity}" ]; then
+  eval "${identity}"
+  gosu cyrus env HOME="${CYRUS_HOME}" git config --global user.name  "${CYRUS_GIT_NAME}"
+  gosu cyrus env HOME="${CYRUS_HOME}" git config --global user.email "${CYRUS_GIT_EMAIL}"
+  echo "    committer: ${CYRUS_GIT_NAME} <${CYRUS_GIT_EMAIL}>"
+else
+  echo "    WARN: could not derive App identity; using baked fallback"
+fi
+
 echo "==> Starting Cyrus agent as cyrus user"
 cd "${CYRUS_HOME}"
 # Put mise's shim dir on PATH so the agent's non-interactive shells resolve

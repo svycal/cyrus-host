@@ -1,0 +1,127 @@
+#!/usr/bin/env node
+'use strict';
+// Mint a GitHub App installation token (or derive the App bot's git identity).
+//
+// GitHub Apps have no long-lived credential by design: the private key is
+// durable, but it can't be used directly as a git/gh password — it must be
+// exchanged (App JWT -> installation access token), and those tokens expire after
+// ~1h. So instead of a refresh daemon we mint *on demand*: the git credential
+// helper and the `gh` wrapper both call this fresh per operation, and a short
+// on-disk cache keeps back-to-back calls from re-hitting the API.
+//
+// Reads GH_APP_ID, GH_APP_INSTALLATION_ID, GH_APP_PRIVATE_KEY from the env
+// (Fly secrets). Pure Node — uses built-in `crypto` for the RS256 JWT and the
+// global `fetch`, so no openssl/apt additions are needed.
+//
+//   gh-app-token            print a fresh installation token
+//   gh-app-token token      (same)
+//   gh-app-token git-identity   print eval-able CYRUS_GIT_NAME / CYRUS_GIT_EMAIL
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const APP_ID = process.env.GH_APP_ID;
+const INSTALLATION_ID = process.env.GH_APP_INSTALLATION_ID;
+let PRIVATE_KEY = process.env.GH_APP_PRIVATE_KEY;
+
+const API = 'https://api.github.com';
+const UA = 'cyrus-host';
+
+function die(msg) {
+  process.stderr.write(`gh-app-token: ${msg}\n`);
+  process.exit(1);
+}
+
+if (!APP_ID || !INSTALLATION_ID || !PRIVATE_KEY) {
+  die('GH_APP_ID, GH_APP_INSTALLATION_ID and GH_APP_PRIVATE_KEY must all be set');
+}
+// Tolerate a PEM stored with literal "\n" (e.g. if flattened into the secret).
+if (PRIVATE_KEY.includes('\\n')) PRIVATE_KEY = PRIVATE_KEY.replace(/\\n/g, '\n');
+
+function b64url(input) {
+  return Buffer.from(input).toString('base64')
+    .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function appJwt() {
+  const now = Math.floor(Date.now() / 1000);
+  // iat backdated 60s for clock skew; exp 9 min out (GitHub's max is 10).
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const payload = { iat: now - 60, exp: now + 540, iss: APP_ID };
+  const signingInput = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
+  const signature = crypto.createSign('RSA-SHA256').update(signingInput).sign(PRIVATE_KEY);
+  return `${signingInput}.${b64url(signature)}`;
+}
+
+async function api(pathname, { method = 'GET', token } = {}) {
+  const res = await fetch(`${API}${pathname}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': UA,
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    die(`${method} ${pathname} -> ${res.status} ${res.statusText} ${body}`.trim());
+  }
+  return res.json();
+}
+
+const CACHE_FILE = path.join(
+  process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'),
+  'cyrus', `gh-app-token-${INSTALLATION_ID}.json`,
+);
+
+function readCachedToken() {
+  try {
+    const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    // Reuse only while >10 min of life remains, so an op can't start on a token
+    // that expires mid-flight.
+    if (data.token && data.expires_at &&
+        Date.parse(data.expires_at) - Date.now() > 600_000) {
+      return data.token;
+    }
+  } catch { /* missing or unparseable cache -> mint fresh */ }
+  return null;
+}
+
+function writeCachedToken(token, expiresAt) {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    fs.writeFileSync(CACHE_FILE, JSON.stringify({ token, expires_at: expiresAt }), { mode: 0o600 });
+  } catch { /* cache is best-effort */ }
+}
+
+async function getToken() {
+  const cached = readCachedToken();
+  if (cached) return cached;
+  const data = await api(`/app/installations/${INSTALLATION_ID}/access_tokens`, {
+    method: 'POST', token: appJwt(),
+  });
+  writeCachedToken(data.token, data.expires_at);
+  return data.token;
+}
+
+async function gitIdentity() {
+  const jwt = appJwt();
+  const app = await api('/app', { token: jwt });
+  const login = `${app.slug}[bot]`;
+  const user = await api(`/users/${login}`, { token: jwt });
+  return { name: login, email: `${user.id}+${login}@users.noreply.github.com` };
+}
+
+(async () => {
+  const cmd = process.argv[2] || 'token';
+  if (cmd === 'token') {
+    process.stdout.write(`${await getToken()}\n`);
+  } else if (cmd === 'git-identity') {
+    const { name, email } = await gitIdentity();
+    process.stdout.write(`CYRUS_GIT_NAME='${name}'\nCYRUS_GIT_EMAIL='${email}'\n`);
+  } else {
+    die(`unknown command: ${cmd}`);
+  }
+})().catch((e) => die(e && e.message ? e.message : String(e)));
