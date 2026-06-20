@@ -63,7 +63,9 @@ fly volumes create cyrus_data --region iad --size 20 --app savvycal-cyrus
 # Secrets (see below for what each is)
 fly secrets set \
   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat... \
-  GH_TOKEN=github_pat_... \
+  GH_APP_ID=... \
+  GH_APP_INSTALLATION_ID=... \
+  GH_APP_PRIVATE_KEY="$(cat cyrus-host.private-key.pem)" \
   EZSUITE_AUTH_KEY=... \
   OBAN_AUTH_KEY=... \
   --app savvycal-cyrus
@@ -73,12 +75,14 @@ fly deploy
 
 ### Required secrets
 
-| Secret                    | Purpose                                                       |
-| ------------------------- | ------------------------------------------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Claude auth for the agent (subscription token, see below).    |
-| `GH_TOKEN`                | PAT the baked git credential helper uses to clone + push PRs. |
-| `EZSUITE_AUTH_KEY`        | Auth for our private `ezsuite` Hex repo (used by repo setup). |
-| `OBAN_AUTH_KEY`           | Auth for the private Oban Pro Hex repo (used by repo setup).  |
+| Secret                    | Purpose                                                           |
+| ------------------------- | ---------------------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude auth for the agent (subscription token, see below).        |
+| `GH_APP_ID`               | GitHub App ID — identifies the App used for git + PR auth.        |
+| `GH_APP_INSTALLATION_ID`  | The App's installation ID on the `svycal` org.                   |
+| `GH_APP_PRIVATE_KEY`      | The App's private key (PEM); used to mint installation tokens.    |
+| `EZSUITE_AUTH_KEY`        | Auth for our private `ezsuite` Hex repo (used by repo setup).     |
+| `OBAN_AUTH_KEY`           | Auth for the private Oban Pro Hex repo (used by repo setup).      |
 
 #### Generating the `CLAUDE_CODE_OAUTH_TOKEN`
 
@@ -99,41 +103,52 @@ The Cyrus connection token (`cysk…`) is **not** a Fly secret — it's register
 once interactively in the one-time bootstrap below and then persists on the
 volume under `/home/cyrus/.cyrus`.
 
-#### Generating the `GH_TOKEN`
+#### Setting up the GitHub App (`GH_APP_*`)
 
-This PAT is what the agent uses to clone, push branches, and open PRs on our
-private `svycal` repos. The image bakes a git credential helper
-(`gh auth git-credential`) for the `cyrus` user, so git and `gh` pick up
-`GH_TOKEN` automatically on every boot — no `gh auth setup-git` step required.
+The agent authenticates as a **GitHub App**, not a personal token. This is what
+makes PRs and comments it opens show up as the App's **`…[bot]`** account (with
+the `Bot` badge) instead of whoever owns a PAT — matching how the hosted Cyrus
+cloud used to look. The same App credential is used for clone + push, so commits
+and PRs share one bot identity.
 
-> **Tip:** for shared infra, prefer a dedicated bot/service GitHub account added
-> to the `svycal` org over a personal PAT — it keeps PR authorship and audit
-> trails clean and survives credential rotation. A personal PAT is fine for a
-> quick trial.
+**Why an App and not a PAT:** the `[bot]` badge only comes from a GitHub App. A
+PAT — even one on a dedicated bot _user_ account — would show that user, not a
+bot. Apps have **no long-lived token by design**: the private key is durable, but
+it can only be exchanged for short-lived (~1h) _installation tokens_. The image
+handles that exchange itself, minting a fresh token **on demand** per git/`gh`
+operation (see [Git auth internals](#git-auth-internals-github-app)) — so there's
+no token to rotate and nothing to refresh.
 
-**Recommended — fine-grained PAT** (GitHub → Settings → Developer settings →
-[Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)):
+**Create the App** (GitHub → the `svycal` org → Settings → Developer settings →
+[GitHub Apps](https://github.com/organizations/svycal/settings/apps) → New GitHub
+App):
 
-1. **Token name:** e.g. `cyrus-host`.
-2. **Resource owner:** select **`svycal`** (the org that owns the repos), not
-   your personal account. If it's missing or shows "approval required," an org
-   owner must approve it, and the org must permit fine-grained tokens.
-3. **Expiration:** a finite window (e.g. 90 days); rotate later via
-   `fly secrets set`.
-4. **Repository access:** _Only select repositories_ → the repos Cyrus will work
-   on (e.g. `appointments-app`, `cyrus-host`), or _All repositories_.
-5. **Repository permissions** (everything else "No access"):
+1. **Name:** e.g. `savvycal-cyrus` (this becomes the `savvycal-cyrus[bot]`
+   handle). Give it an avatar — that's what shows on PRs.
+2. **Homepage URL:** anything (e.g. this repo); unused.
+3. **Webhook:** **uncheck Active** — we don't receive webhooks.
+4. **Repository permissions** (everything else "No access"):
    - **Contents:** Read and write (clone + push)
    - **Pull requests:** Read and write (open/update PRs)
    - **Metadata:** Read-only (mandatory, auto-selected)
    - **Workflows:** Read and write — _only_ if Cyrus may edit
      `.github/workflows/` files.
+5. **Where can this App be installed?** Only on this account.
+6. Create it, then **note the App ID** (top of the App's settings page) →
+   `GH_APP_ID`.
+7. **Generate a private key** (same page, "Private keys" → Generate). Downloads a
+   `.pem` → `GH_APP_PRIVATE_KEY` (pass the file contents, see the
+   `fly secrets set` example above).
 
-**Alternative — classic PAT** (if fine-grained tokens are blocked for the org;
-[Tokens (classic)](https://github.com/settings/tokens/new)): scopes `repo`,
-`workflow` (only if editing workflow files), and `read:org`. If the org enforces
-SAML SSO, click **Configure SSO → Authorize** for `svycal` or git operations
-will be rejected.
+**Install the App** on the org (App settings → Install App → Install on `svycal`):
+choose _Only select repositories_ → the repos Cyrus will work on (e.g.
+`appointments-app`, `cyrus-host`), or _All repositories_. After installing, the
+URL is `…/installations/<INSTALLATION_ID>` → `GH_APP_INSTALLATION_ID`. (You can
+also read it back later with `gh api /orgs/svycal/installations`.)
+
+> **Rotation:** the only thing that can expire is the private key, and only if you
+> revoke it. Installation tokens are minted fresh each time, so there's nothing
+> periodic to rotate.
 
 ### One-time bootstrap (interactive)
 
@@ -169,35 +184,40 @@ Notes:
   `fly machine restart <id> --app savvycal-cyrus`. On a clean boot it logs
   `📦 Managing N repositories` listing what it picked up. (The repo itself is
   cloned lazily into `~/.cyrus/repos/<name>` on the first issue, not at boot.)
-- No `gh auth setup-git` is needed — the credential helper is baked into the
-  image (see `GH_TOKEN` above).
+- No `gh auth setup-git` is needed — the App credential helper is baked into the
+  image (see the GitHub App section above).
 - If you accidentally run any of these as root, the state goes to `/root/.cyrus`
   and is lost on restart; just re-run it as the `cyrus` user.
 
 ### Verify GitHub access before assigning issues
 
-The repo is cloned lazily on the first issue, so a bad `GH_TOKEN` (e.g. a
-fine-grained PAT scoped to your personal account instead of the `svycal` org)
-isn't caught until that first run fails at clone. Verify access up front as the
-`cyrus` user — both checks should succeed:
+The repo is cloned lazily on the first issue, so a misconfigured App (wrong
+`GH_APP_*` secrets, or the App not installed on the repo) isn't caught until that
+first run fails at clone. Verify up front as the `cyrus` user — all three checks
+should succeed:
 
 ```sh
 fly ssh console --app savvycal-cyrus -C "/bin/bash -lc '
+  gosu cyrus env HOME=/home/cyrus gh-app-token token >/dev/null && echo \"mint: OK\";
   gosu cyrus env HOME=/home/cyrus gh api repos/svycal/appointments-app --jq .permissions;
   gosu cyrus env HOME=/home/cyrus git ls-remote https://github.com/svycal/appointments-app refs/heads/main >/dev/null && echo \"git: OK\"
 '"
 ```
 
-A `404` from `gh api` or a `403` from `git ls-remote` means the token can't see
-the repo — re-scope the PAT (resource owner `svycal`, Contents + Pull requests
-read/write) and `fly secrets set GH_TOKEN=…` (which restarts the machine).
+- `mint` fails → bad `GH_APP_ID` / `GH_APP_INSTALLATION_ID` / `GH_APP_PRIVATE_KEY`
+  (the error names which call failed).
+- `mint` succeeds but `gh api` 404s or `git ls-remote` 403s → the App isn't
+  installed on that repo (App settings → Install App → configure repos).
+
+Fix the secrets with `fly secrets set GH_APP_…=…` (which restarts the machine),
+or adjust the App's repo selection on GitHub.
 
 #### Recovering a missing base clone
 
 Cyrus creates the **base clone** at `~/.cyrus/repos/<name>` on a repo's first
 issue, then makes a per-issue worktree from it. If that first clone fails (e.g. a
-bad `GH_TOKEN`), it isn't retried automatically — create the base clone manually
-as the `cyrus` user, then re-assign the issue:
+misconfigured App), it isn't retried automatically — create the base clone
+manually as the `cyrus` user, then re-assign the issue:
 
 ```sh
 fly ssh console --app savvycal-cyrus -C "/bin/bash -lc '
@@ -207,15 +227,38 @@ fly ssh console --app savvycal-cyrus -C "/bin/bash -lc '
 
 Verifying token access (above) before the first issue avoids this entirely.
 
+## Git auth internals (GitHub App)
+
+We authenticate as a GitHub App so PRs carry the App's `…[bot]` identity. Because
+Apps have no long-lived token, three small scripts (in [`bin/`](bin/), baked into
+`/usr/local/bin`) mint installation tokens **on demand** — no refresh daemon:
+
+- **`gh-app-token`** — exchanges the App private key (`GH_APP_*` secrets) for a
+  fresh installation token via an RS256 JWT, with a short on-disk cache so
+  back-to-back calls don't re-hit the API. Pure Node (built-in `crypto` + global
+  `fetch`); no `openssl`. Also has a `git-identity` mode (below).
+- **`git-credential-gh-app`** — a git credential helper (`credential.helper =
+  gh-app`) that serves a fresh token for every clone/fetch/push. git invokes it
+  per operation, so the token is never stale.
+- **`gh`** — a wrapper on `PATH` ahead of `/usr/bin/gh` that injects a fresh
+  `GH_TOKEN` before exec'ing the real `gh`. `gh` has no native App auth, so this
+  is how `gh pr create` (which the agent uses) authenticates as the bot.
+
+Each agent command runs `git`/`gh` as a fresh subprocess, so on-demand minting is
+enough — there's no long-lived process holding a stale token.
+
 ## Git commit identity
 
-Cyrus doesn't set a committer identity on self-hosted, so the image bakes a
-global `user.name`/`user.email` for the `cyrus` user (`cyrusagent` /
-`208047790+cyrusagent@users.noreply.github.com`) — agent commits are authored by
-the `cyrusagent` bot, not whoever owns `GH_TOKEN` (AP-894), and link to that bot
-on GitHub. If a repo's commits ever show the wrong author, check for a stray
-**local** identity overriding the global (local scope wins, and worktrees inherit
-it from the base clone): `git -C ~/.cyrus/repos/<name> config --local --get-regexp '^user\.'`.
+Commits use the **same** App bot identity as PRs, so both line up. Cyrus doesn't
+set a committer identity on self-hosted, so `docker-entrypoint.sh` derives it from
+the App at boot (`gh-app-token git-identity` → the `…[bot]` user and its GitHub
+noreply email) and writes the `cyrus` user's global `user.name`/`user.email`.
+This is best-effort: if the `GH_APP_*` secrets are missing the boot falls back to
+the baked default (AP-894) rather than a guessed `user@host`.
+
+If a repo's commits ever show the wrong author, check for a stray **local**
+identity overriding the global (local scope wins, and worktrees inherit it from
+the base clone): `git -C ~/.cyrus/repos/<name> config --local --get-regexp '^user\.'`.
 
 ## Open questions
 
