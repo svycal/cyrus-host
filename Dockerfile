@@ -77,8 +77,8 @@ RUN su cyrus -c "git config --global credential.'https://github.com'.helper 'gh-
 # missing GH_APP_* secrets), so commits still get *some* stable identity rather
 # than a guessed user@host (AP-894). Base clones must NOT carry a local
 # user.name/user.email — local scope would override both (see README).
-RUN su cyrus -c "git config --global user.name 'cyrusagent'" \
-    && su cyrus -c "git config --global user.email '208047790+cyrusagent@users.noreply.github.com'"
+RUN su cyrus -c "git config --global user.name 'savvycal-agent[bot]'" \
+    && su cyrus -c "git config --global user.email '295432075+savvycal-agent[bot]@users.noreply.github.com'"
 
 # mise installs per-repo runtimes from each repo's .tool-versions. Install it
 # system-wide so the cyrus user picks it up via the activation in .bashrc.
