@@ -242,9 +242,22 @@ matters — it avoids the failed-clone-then-stuck state entirely.
   dashboard); the agent picks them up on the next **restart**, not live — see the
   bootstrap notes above.
 
+## Git commit identity
+
+Cyrus does **not** set a committer identity on self-hosted, so the image bakes a
+global `user.name`/`user.email` for the `cyrus` user (`cyrusagent` /
+`208047790+cyrusagent@users.noreply.github.com`) — agent commits are authored by
+the `cyrusagent` bot, not whoever owns `GH_TOKEN` (AP-894). The noreply email
+links commits to that bot account on GitHub.
+
+> ⚠️ Base clones must not carry a **local** `user.name`/`user.email` in their
+> `.git/config` — local scope overrides the baked global. Worktrees inherit the
+> base clone's config, so a stray local identity there silently re-authors every
+> commit for that repo. If a repo's commits show the wrong author, check
+> `git -C ~/.cyrus/repos/<name> config --local --get-regexp '^user\.'` and unset
+> it (`git config --local --unset user.name`/`user.email`) so the global applies.
+
 ## Open questions
 
 - Exact Cloudflare tunnel egress endpoints to allowlist.
 - Volume sizing once several repos' mise caches coexist.
-- Git commit identity: confirm whether Cyrus sets `user.name`/`user.email` per
-  repo, or whether we need a baked global default for the `cyrus` user.

@@ -60,6 +60,16 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash cyrus
 RUN su cyrus -c "git config --global credential.'https://github.com'.helper '!gh auth git-credential'" \
     && su cyrus -c "git config --global credential.'https://gist.github.com'.helper '!gh auth git-credential'"
 
+# Bake an explicit git committer identity for the cyrus user so agent commits are
+# authored by the cyrusagent bot, not whoever owns the GH_TOKEN (AP-894). Cyrus
+# does not set an identity itself on self-hosted, so without this git falls back
+# to a guessed user@host (or whatever a base clone's local config happens to
+# carry). This is the global default; base clones must NOT carry a local
+# user.name/user.email that would override it. The email is GitHub's noreply for
+# the cyrusagent account, so commits link to that bot on GitHub.
+RUN su cyrus -c "git config --global user.name 'cyrusagent'" \
+    && su cyrus -c "git config --global user.email '208047790+cyrusagent@users.noreply.github.com'"
+
 # mise installs per-repo runtimes from each repo's .tool-versions. Install it
 # system-wide so the cyrus user picks it up via the activation in .bashrc.
 ENV MISE_INSTALL_PATH=/usr/local/bin/mise
