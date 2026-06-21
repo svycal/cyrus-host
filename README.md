@@ -79,6 +79,24 @@ runtime setup. The install is non-interactive and only clones a public repo (no
 auth at build time). To add more global skills, install additional
 `…@claude-plugins-official` plugins the same way.
 
+**Auto-approval:** the agent runs fully headless under `--permission-mode
+default`, so a skill it invokes that isn't pre-approved would hit a permission
+prompt with no one to answer it, and be denied. The `Dockerfile` adds a
+`permissions.allow` rule for the skill to the same user settings:
+
+```json
+{ "permissions": { "allow": [
+  "Skill(code-review:code-review)",
+  "Skill(code-review:code-review *)"
+] } }
+```
+
+Allow rules merge across scopes and short-circuit to approval *before* the
+permission prompt, so this lets the agent invoke `/code-review` itself without a
+prompt. The matcher is the namespaced `plugin:skill` form (the ` *` variant
+covers invocations that pass arguments). Pre-approve other global skills by
+adding their `Skill(…)` matchers here.
+
 ## First-time setup
 
 ```sh

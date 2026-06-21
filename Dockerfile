@@ -91,6 +91,19 @@ RUN su cyrus -c "git config --global user.name 'savvycal-agent[bot]'" \
 RUN su cyrus -c "claude plugin marketplace add anthropics/claude-plugins-official \
     && claude plugin install code-review@claude-plugins-official --scope user"
 
+# Auto-approve agent-invoked code-review so the fully-headless agent can run it
+# without a permission prompt (with no human to approve, the prompt would be
+# denied). The agent is launched with `--permission-mode default`; a
+# `permissions.allow` rule in user settings short-circuits to approval BEFORE the
+# harness's stdio deny-handler runs, and merges with (does not replace) the
+# harness's own `--allowedTools`. The matcher uses the namespaced `plugin:skill`
+# form; the ` *` variant also covers invocations that pass arguments. jq edits the
+# cyrus-owned settings.json written above (run as root, then restore ownership).
+RUN jq '.permissions.allow = ((.permissions.allow // []) + ["Skill(code-review:code-review)", "Skill(code-review:code-review *)"] | unique)' \
+      /home/cyrus/.claude/settings.json > /home/cyrus/.claude/settings.json.tmp \
+    && mv /home/cyrus/.claude/settings.json.tmp /home/cyrus/.claude/settings.json \
+    && chown cyrus:cyrus /home/cyrus/.claude/settings.json
+
 # mise installs per-repo runtimes from each repo's .tool-versions. Install it
 # system-wide so the cyrus user picks it up via the activation in .bashrc.
 ENV MISE_INSTALL_PATH=/usr/local/bin/mise
