@@ -86,6 +86,8 @@ prompt with no one to answer it, and be denied. The `Dockerfile` adds a
 
 ```json
 { "permissions": { "allow": [
+  "Skill(code-review)",
+  "Skill(code-review *)",
   "Skill(code-review:code-review)",
   "Skill(code-review:code-review *)"
 ] } }
@@ -93,9 +95,13 @@ prompt with no one to answer it, and be denied. The `Dockerfile` adds a
 
 Allow rules merge across scopes and short-circuit to approval *before* the
 permission prompt, so this lets the agent invoke `/code-review` itself without a
-prompt. The matcher is the namespaced `plugin:skill` form (the ` *` variant
-covers invocations that pass arguments). Pre-approve other global skills by
-adding their `Skill(…)` matchers here.
+prompt. We allow **both** the bare `code-review` and the namespaced
+`code-review:code-review` matchers (each with a ` *` variant for invocations that
+pass arguments) — when asked naturally ("run a code review"), the model calls the
+skill by its **bare** alias `Skill(code-review)`, not the namespaced form, so a
+namespaced-only rule misses it: the call is denied and the agent silently falls
+back to reviewing by hand. Pre-approve other global skills by adding their
+`Skill(…)` matchers here.
 
 #### Why not Cyrus's dashboard?
 
