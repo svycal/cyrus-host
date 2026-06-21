@@ -152,42 +152,32 @@ also read it back later with `gh api /orgs/svycal/installations`.)
 
 ### One-time bootstrap (interactive)
 
-After the first deploy, exec in to pair Cyrus and register repos. This writes to
-`~/.cyrus` (`.env`, `config.json`), which only persists if it lands on the volume
-at `/home/cyrus/.cyrus` — so **every command must run as the `cyrus` user**.
-
-> ⚠️ `fly ssh console` logs you in as **root**, whose `~/.cyrus` is
-> `/root/.cyrus` — ephemeral and ignored by the running agent. Drop to the
-> `cyrus` user (with its `HOME`) before running anything:
+After the first deploy, exec in as the `cyrus` user to pair the agent with your
+Cyrus account. Pass `--user cyrus` so the shell runs as that user with
+`HOME=/home/cyrus` — pairing writes to `~/.cyrus`, which only persists if it
+lands on the volume mounted there:
 
 ```sh
-fly ssh console --app savvycal-cyrus
+fly ssh console --app savvycal-cyrus --user cyrus
 
-# you start as root — switch to the cyrus user FIRST:
-gosu cyrus env HOME=/home/cyrus bash -l
-
-# now, as cyrus (state lands on the volume):
-cyrus auth cysk...                                   # pair (hosted-connected)
-cyrus self-add-repo https://github.com/svycal/appointments-app
+cyrus auth cysk...   # pair (hosted-connected)
 ```
+
+Then **add each repo from the Cyrus web UI**. Cyrus registers it with the running
+agent automatically — no `self-add-repo` and no restart needed. The repo is
+cloned lazily into `~/.cyrus/repos/<name>` on its first issue, not when you add
+it.
 
 Notes:
 
-- `cyrus auth` / `self-add-repo` print
-  `EADDRINUSE ... 127.0.0.1:3456` after their work. That's harmless: they save
-  their state (`.env` / `config.json`) and then try to auto-start a second agent,
-  which collides with the always-on one started by the entrypoint.
-- **A restart is needed after pairing or adding/registering a repo.** In practice
-  the running agent does _not_ hot-load a new repo from a `config.json` change
-  (whether written by `self-add-repo` or the Cyrus dashboard) — it only reloads
-  `.env`. Restart so it boots with the updated config:
-  `fly machine restart <id> --app savvycal-cyrus`. On a clean boot it logs
-  `📦 Managing N repositories` listing what it picked up. (The repo itself is
-  cloned lazily into `~/.cyrus/repos/<name>` on the first issue, not at boot.)
+- `cyrus auth` prints `EADDRINUSE ... 127.0.0.1:3456` after pairing. That's
+  harmless: it saves its state (`.env`) and then tries to auto-start a second
+  agent, which collides with the always-on one started by the entrypoint.
 - No `gh auth setup-git` is needed — the App credential helper is baked into the
   image (see the GitHub App section above).
-- If you accidentally run any of these as root, the state goes to `/root/.cyrus`
-  and is lost on restart; just re-run it as the `cyrus` user.
+- Forgetting `--user cyrus` lands you as **root**, whose `~/.cyrus` is
+  `/root/.cyrus` — ephemeral and ignored by the running agent. Reconnect with
+  `--user cyrus` so state lands on the volume.
 
 ### Verify GitHub access before assigning issues
 
@@ -197,10 +187,10 @@ first run fails at clone. Verify up front as the `cyrus` user — all three chec
 should succeed:
 
 ```sh
-fly ssh console --app savvycal-cyrus -C "/bin/bash -lc '
-  gosu cyrus env HOME=/home/cyrus gh-app-token token >/dev/null && echo \"mint: OK\";
-  gosu cyrus env HOME=/home/cyrus gh api repos/svycal/appointments-app --jq .permissions;
-  gosu cyrus env HOME=/home/cyrus git ls-remote https://github.com/svycal/appointments-app refs/heads/main >/dev/null && echo \"git: OK\"
+fly ssh console --app savvycal-cyrus --user cyrus -C "bash -lc '
+  gh-app-token token >/dev/null && echo \"mint: OK\";
+  gh api repos/svycal/appointments-app --jq .permissions;
+  git ls-remote https://github.com/svycal/appointments-app refs/heads/main >/dev/null && echo \"git: OK\"
 '"
 ```
 
@@ -220,8 +210,8 @@ misconfigured App), it isn't retried automatically — create the base clone
 manually as the `cyrus` user, then re-assign the issue:
 
 ```sh
-fly ssh console --app savvycal-cyrus -C "/bin/bash -lc '
-  gosu cyrus env HOME=/home/cyrus git clone https://github.com/svycal/<repo> \
+fly ssh console --app savvycal-cyrus --user cyrus -C "bash -lc '
+  git clone https://github.com/svycal/<repo> \
     /home/cyrus/.cyrus/repos/<repo>'"
 ```
 
