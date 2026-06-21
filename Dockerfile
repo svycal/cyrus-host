@@ -96,10 +96,16 @@ RUN su cyrus -c "claude plugin marketplace add anthropics/claude-plugins-officia
 # denied). The agent is launched with `--permission-mode default`; a
 # `permissions.allow` rule in user settings short-circuits to approval BEFORE the
 # harness's stdio deny-handler runs, and merges with (does not replace) the
-# harness's own `--allowedTools`. The matcher uses the namespaced `plugin:skill`
-# form; the ` *` variant also covers invocations that pass arguments. jq edits the
-# cyrus-owned settings.json written above (run as root, then restore ownership).
-RUN jq '.permissions.allow = ((.permissions.allow // []) + ["Skill(code-review:code-review)", "Skill(code-review:code-review *)"] | unique)' \
+# harness's own `--allowedTools`. jq edits the cyrus-owned settings.json written
+# above (run as root, then restore ownership).
+#
+# We allow BOTH the bare `code-review` and the namespaced `code-review:code-review`
+# matchers (each with a ` *` variant covering invocations that pass arguments).
+# This matters: when asked naturally ("run a code review"), the model invokes the
+# skill by its bare alias `Skill(code-review)`, not the namespaced form — so a
+# namespaced-only rule misses it, the headless prompt denies it, and the agent
+# silently falls back to reviewing by hand (observed on a real issue).
+RUN jq '.permissions.allow = ((.permissions.allow // []) + ["Skill(code-review)", "Skill(code-review *)", "Skill(code-review:code-review)", "Skill(code-review:code-review *)"] | unique)' \
       /home/cyrus/.claude/settings.json > /home/cyrus/.claude/settings.json.tmp \
     && mv /home/cyrus/.claude/settings.json.tmp /home/cyrus/.claude/settings.json \
     && chown cyrus:cyrus /home/cyrus/.claude/settings.json
