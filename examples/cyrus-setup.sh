@@ -17,10 +17,6 @@
 #   * A running PostgreSQL with postgres/postgres on localhost  -> we just assert
 #     reachability instead of starting the cluster and configuring auth.
 #
-# A heavier "provision everything from a bare runtime" variant (for Cyrus's
-# hosted cloud runtime, where nothing is baked in) can live alongside it as a
-# cyrus-setup-cloud.sh fallback.
-#
 # See: https://www.atcyrus.com/docs/setup-scripts
 set -euo pipefail
 
