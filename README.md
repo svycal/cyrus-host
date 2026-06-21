@@ -97,6 +97,33 @@ prompt. The matcher is the namespaced `plugin:skill` form (the ` *` variant
 covers invocations that pass arguments). Pre-approve other global skills by
 adding their `Skill(…)` matchers here.
 
+#### Why not Cyrus's dashboard?
+
+Cyrus has its own canonical surfaces — global **skills** via the dashboard
+(`app.atcyrus.com/skills`) and tool permissions via `config.json` `allowedTools`
+— so it's worth saying why we configure this in the image instead. Both of our
+constraints point off that path:
+
+- **We want the genuine Anthropic-managed plugin.** The dashboard catalog is
+  Cyrus-curated and doesn't install Anthropic marketplace plugins; the nearest
+  option is a hand-authored "custom skill" (paste-in instructions), i.e. a
+  vendored copy, not the maintained `code-review` plugin.
+- **We want it in code, not a web UI.** For this hosted-connected setup
+  (`cysk…` pairing) Cyrus's cloud **manages and overwrites `config.json`**, so
+  `allowedTools` can't be reliably pinned in code there anyway. The image-layer
+  `~/.claude/settings.json` is the one place that's both in-code and outside any
+  Cyrus-managed path, so it isn't clobbered.
+
+This doesn't conflict with Cyrus: our files live in `~/.claude` (untouched by
+Cyrus, which manages `~/.cyrus` + the repo's `.claude/`), and `enabledPlugins` /
+`permissions.allow` simply merge with Cyrus's own `--plugin-dir` / `--allowedTools`.
+
+> **Upgrade dependency:** this relies on Cyrus launching `claude` with
+> `--setting-sources=user,project,local` (so the user-scope settings load). That
+> holds today but is an implementation detail, not a documented contract — if a
+> Cyrus upgrade drops `user` from `--setting-sources`, both the plugin and its
+> auto-approval would silently stop loading. Re-check after major Cyrus bumps.
+
 ## First-time setup
 
 ```sh
