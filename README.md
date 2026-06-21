@@ -254,13 +254,8 @@ set a committer identity on self-hosted, so `docker-entrypoint.sh` derives it fr
 the App at boot (`gh-app-token git-identity` → the `…[bot]` user and its GitHub
 noreply email) and writes the `cyrus` user's global `user.name`/`user.email`.
 This is best-effort: if the `GH_APP_*` secrets are missing the boot falls back to
-the baked default (AP-894) rather than a guessed `user@host`.
+the baked default rather than a guessed `user@host`.
 
 If a repo's commits ever show the wrong author, check for a stray **local**
 identity overriding the global (local scope wins, and worktrees inherit it from
 the base clone): `git -C ~/.cyrus/repos/<name> config --local --get-regexp '^user\.'`.
-
-## Open questions
-
-- Exact Cloudflare tunnel egress endpoints to allowlist.
-- Volume sizing once several repos' mise caches coexist.
