@@ -80,6 +80,17 @@ RUN su cyrus -c "git config --global credential.'https://github.com'.helper 'gh-
 RUN su cyrus -c "git config --global user.name 'savvycal-agent[bot]'" \
     && su cyrus -c "git config --global user.email '295432075+savvycal-agent[bot]@users.noreply.github.com'"
 
+# Make Anthropic's official `code-review` plugin available to every Claude
+# session on this host. The Cyrus agent launches `claude` with
+# `--setting-sources=user,project,local`, so a user-scope install is picked up
+# globally via `enabledPlugins` in the cyrus user's settings. We bake it here
+# (into /home/cyrus/.claude, which is the image layer — the Fly volume only
+# covers ~/.cyrus) so it survives restarts and needs no per-repo setup. Both
+# commands are non-interactive and only clone a public GitHub repo (no auth
+# token needed at build time). Provides the `/code-review:code-review` skill.
+RUN su cyrus -c "claude plugin marketplace add anthropics/claude-plugins-official \
+    && claude plugin install code-review@claude-plugins-official --scope user"
+
 # mise installs per-repo runtimes from each repo's .tool-versions. Install it
 # system-wide so the cyrus user picks it up via the activation in .bashrc.
 ENV MISE_INSTALL_PATH=/usr/local/bin/mise
