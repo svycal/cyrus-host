@@ -30,6 +30,12 @@ mise cache, cloned repos, and worktrees all live on the Fly volume mounted at
 `/home/cyrus/.cyrus`, subsequent issues on the same repo reuse the cached
 toolchain and stay well under the timeout.
 
+[`examples/cyrus-setup.sh`](examples/cyrus-setup.sh) is a worked example — the
+real script from our `appointments-app` repo. It assumes this host's baked-in
+`mise` + Postgres, installs the repo's runtimes, gives each worktree its own
+database (derived from `LINEAR_ISSUE_IDENTIFIER`), and warm-caches compiled
+`deps`/`_build`/`node_modules` on the volume so repeat runs stay fast.
+
 ### Fly shape
 
 - App `savvycal-cyrus`, **always-on**: no `[http_service]`, so Fly never
