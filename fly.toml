@@ -7,6 +7,10 @@
 app = 'savvycal-cyrus'
 primary_region = 'iad'
 
+# Spill room so a memory spike degrades gracefully instead of hanging the VM
+# (a thrash with no swap is what made the box unreachable on 2026-06-24).
+swap_size_mb = 2048
+
 [build]
 
 [env]
@@ -21,4 +25,4 @@ primary_region = 'iad'
 
 [[vm]]
   size = 'performance-2x'
-  memory = '4gb'
+  memory = '8gb'
